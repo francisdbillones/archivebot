@@ -1,0 +1,10 @@
+[
+    {
+        "user_id": "abc",
+        "last_tweet_id": "abc"
+    },
+    {
+        "user_id": "foo",
+        "last_tweet_id": "foo"
+    }
+]
