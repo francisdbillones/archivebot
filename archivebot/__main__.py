@@ -1,46 +1,36 @@
-from queue import Queue
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 
-import tweepy
-from archivebot.restore_streams import restore_streams
-
-from mentions_stream import MentionsStream
-from tracking_stream import TrackingStream
-from configs import API_KEY, API_KEY_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
+from config import MAX_WORKERS
+from task import task
+import db
 
 
-def main(api: tweepy.API):
-    queue = Queue()
-    streams = restore_streams()
+def main():
+    users_to_monitor = db.get_users_to_monitor()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(task, user, check_delete_limit=10)
+            for user in users_to_monitor
+        }
 
-    mentions_stream = MentionsStream(
-        API_KEY,
-        API_KEY_SECRET,
-        ACCESS_TOKEN,
-        ACCESS_TOKEN_SECRET,
-        queue=queue,
-        daemon=True,
-    )
-    mentions_stream.filter(track=["@archivebot"]).start()
+        while True:
+            done, not_done = concurrent.futures.wait(futures)
 
-    while True:
-        tweet = queue.get()
+            for future in done:
+                user, new_tweets, deleted_tweets, last_tweet = future.result()
+                db.save_tweets(new_tweets)
+                db.set_deleted_tweets(deleted_tweets)
 
-        # iterate through mentions in the tweet not including the mention to us
-        # for mention in tweet.entities["user_mentions"]:
-        #     if mention["screen_name"] != "@archivebot":
-        #         # check if we're already tracking this user
-        #         if ...:
-        #             continue
+                # submit again
+                futures.add(
+                    executor.submit(
+                        task, user, last_tweet=last_tweet, check_delete_limit=10
+                    )
+                )
 
-        #         new_tracking_stream = TrackingStream(
-        #             api, mention["screen_name"], queue=queue, daemon=True
-        #         )
-        #         new_tracking_stream.filter(follow=[mention["id"]])
-        #         new_tracking_stream.thread
-        breakpoint()
+                futures.remove(future)
 
 
 if __name__ == "__main__":
-    from configs import API
-
-    main(API)
+    main()
